@@ -1763,7 +1763,8 @@ __webpack_require__.r(__webpack_exports__);
     this.ws.onopen = this.onOpen;
     this.ws.onmessage = this.onMessage;
     this.users = this.users.map(function (user) {
-      user.unreadMessages = 0;
+      user.unread_messages = 0;
+      user.last_message = '';
       return user;
     });
   },
@@ -1784,7 +1785,8 @@ __webpack_require__.r(__webpack_exports__);
             if (!this.messageComponentInstance || this.toId !== message.from) {
               this.users = this.users.map(function (user) {
                 if (user.id === message.from) {
-                  user.unreadMessages = user.unreadMessages + 1;
+                  user.unread_messages = user.unread_messages + 1;
+                  user.last_message = message.content;
                 }
 
                 return user;
@@ -1803,7 +1805,7 @@ __webpack_require__.r(__webpack_exports__);
       this.toId = toId;
       this.users = this.users.map(function (user) {
         if (user.id === _this.toId) {
-          user.unreadMessages = 0;
+          user.unread_messages = 0;
         }
 
         return user;
@@ -1888,6 +1890,10 @@ __webpack_require__.r(__webpack_exports__);
       this.scrollToBottom();
     },
     handleSendMessage: function handleSendMessage() {
+      if (!this.message) {
+        return;
+      }
+
       var message = {
         action: 'message',
         to: this.toId,
@@ -37892,13 +37898,13 @@ var render = function() {
                                 {
                                   name: "show",
                                   rawName: "v-show",
-                                  value: user.unreadMessages > 0,
-                                  expression: "user.unreadMessages > 0"
+                                  value: user.unread_messages > 0,
+                                  expression: "user.unread_messages > 0"
                                 }
                               ],
                               staticClass: "badge badge-primary badge-pill"
                             },
-                            [_vm._v(_vm._s(user.unreadMessages))]
+                            [_vm._v(_vm._s(user.unread_messages))]
                           )
                         ]),
                         _vm._v(" "),
@@ -37910,7 +37916,7 @@ var render = function() {
                             ])
                           ]),
                           _vm._v(" "),
-                          _c("p", [_vm._v("Last message")])
+                          _c("p", [_vm._v(_vm._s(user.last_message))])
                         ])
                       ])
                     ]
@@ -38018,6 +38024,7 @@ var render = function() {
           ],
           ref: "message_input",
           staticClass: "write_msg",
+          staticStyle: { outline: "none!important" },
           attrs: {
             type: "text",
             title: "message",
@@ -38025,6 +38032,15 @@ var render = function() {
           },
           domProps: { value: _vm.message },
           on: {
+            keyup: function($event) {
+              if (
+                !$event.type.indexOf("key") &&
+                _vm._k($event.keyCode, "enter", 13, $event.key, "Enter")
+              ) {
+                return null
+              }
+              return _vm.handleSendMessage()
+            },
             input: function($event) {
               if ($event.target.composing) {
                 return
@@ -38038,6 +38054,7 @@ var render = function() {
           "button",
           {
             staticClass: "msg_send_btn",
+            staticStyle: { outline: "none!important" },
             attrs: { type: "button" },
             on: {
               click: function($event) {

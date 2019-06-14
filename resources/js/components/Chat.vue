@@ -13,11 +13,11 @@
                             <div class="chat_img">
                                 <img src="https://ptetutorials.com/images/user-profile.png" alt="sunil">
                                 <br>
-                                <span class="badge badge-primary badge-pill" v-show="user.unreadMessages > 0">{{ user.unreadMessages }}</span>
+                                <span class="badge badge-primary badge-pill" v-show="user.unread_messages > 0">{{ user.unread_messages }}</span>
                             </div>
                             <div class="chat_ib">
                                 <h5>{{ user.name }} <span class="chat_date">Dec 25</span></h5>
-                                <p>Last message</p>
+                                <p>{{ user.last_message }}</p>
                             </div>
                         </div>
                     </div>
@@ -66,7 +66,8 @@
             this.ws.onmessage = this.onMessage;
 
             this.users = this.users.map((user) => {
-                user.unreadMessages = 0;
+                user.unread_messages = 0;
+                user.last_message = '';
 
                 return user;
             });
@@ -84,7 +85,8 @@
                             if (!this.messageComponentInstance || this.toId !== message.from) {
                                 this.users = this.users.map((user) => {
                                     if (user.id === message.from) {
-                                        user.unreadMessages = user.unreadMessages + 1;
+                                        user.unread_messages = user.unread_messages + 1;
+                                        user.last_message = message.content;
                                     }
 
                                     return user;
@@ -102,7 +104,7 @@
 
                 this.users = this.users.map((user) => {
                     if (user.id === this.toId) {
-                        user.unreadMessages = 0;
+                        user.unread_messages = 0;
                     }
 
                     return user;

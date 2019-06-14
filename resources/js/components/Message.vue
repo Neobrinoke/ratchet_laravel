@@ -21,8 +21,8 @@
         </div>
         <div class="type_msg">
             <div class="input_msg_write">
-                <input type="text" ref="message_input" title="message" v-model="message" class="write_msg" placeholder="Type a message">
-                <button class="msg_send_btn" type="button" @click.prevent="handleSendMessage()"><i class="fa fa-paper-plane-o" aria-hidden="true"></i></button>
+                <input type="text" ref="message_input" title="message" class="write_msg" style="outline: none!important;" placeholder="Type a message" v-model="message" @keyup.enter="handleSendMessage()">
+                <button class="msg_send_btn" type="button" style="outline: none!important;" @click.prevent="handleSendMessage()"><i class="fa fa-paper-plane-o" aria-hidden="true"></i></button>
             </div>
         </div>
     </div>
@@ -63,6 +63,10 @@
                 this.scrollToBottom();
             },
             handleSendMessage() {
+                if (!this.message) {
+                    return;
+                }
+
                 const message = {
                     action: 'message',
                     to: this.toId,
