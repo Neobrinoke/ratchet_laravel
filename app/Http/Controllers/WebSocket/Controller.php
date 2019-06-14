@@ -169,12 +169,14 @@ class Controller implements MessageComponentInterface
         });
 
         if ($from && $to) {
-            $this->command->info("New message from [{$from->userId}] to [{$to->userId}] with content [{$message->content}] !");
+            $this->command->info("New message from [{$from->userId}] to [{$to->userId}] with content [{$message->content}] at [{$message->date}]!");
 
             $to->connection->send(json_encode([
                 'action' => 'message',
                 'from' => $from->userId,
                 'content' => $message->content,
+                'date' => $message->date,
+                'is_mine' => false,
             ]));
         }
     }

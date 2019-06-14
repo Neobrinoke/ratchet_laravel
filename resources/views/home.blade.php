@@ -1,5 +1,10 @@
 @extends('layouts.app')
 
 @section('content')
-    <chat :user-id="parseInt('{{ auth()->id() }}')"></chat>
+    @auth()
+        <chat
+            :user-id="parseInt('{{ auth()->id() }}')"
+            user-data="{{ \App\User::all()->toJson() }}"
+        ></chat>
+    @endauth
 @endsection
