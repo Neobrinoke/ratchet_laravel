@@ -1,12 +1,14 @@
 <?php
 
-namespace App\Http\Controllers\WebSocket;
+namespace App\WebSocket\Controllers;
 
+use App\Message;
+use App\User;
+use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Ratchet\ConnectionInterface;
 use Ratchet\MessageComponentInterface;
 use SplObjectStorage;
-
 
 class Controller implements MessageComponentInterface
 {
@@ -30,7 +32,7 @@ class Controller implements MessageComponentInterface
         $this->channels = collect();
         $this->users = collect();
 
-        $this->command->info("Server start !");
+        $this->command->info('Server start !');
     }
 
     public function onOpen(ConnectionInterface $conn)
@@ -42,15 +44,14 @@ class Controller implements MessageComponentInterface
 
     public function onMessage(ConnectionInterface $conn, $msg)
     {
-        $message = json_decode($msg);
-        if (isset($message->action)) {
-            switch ($message->action) {
+        $msg = json_decode($msg);
+        if (isset($msg->action)) {
+            switch ($msg->action) {
                 case 'register':
-                    $this->register($conn, $message);
+                    $this->register($conn, $msg);
                     break;
-
                 case 'message':
-                    $this->message($conn, $message);
+                    $this->message($conn, $msg);
                     break;
             }
         }
@@ -148,36 +149,59 @@ class Controller implements MessageComponentInterface
         $conn->close();
     }
 
-    private function register(ConnectionInterface $conn, $message)
+    private function register(ConnectionInterface $conn, $msg)
     {
-        if (isset($message->userId)) {
-            $this->command->info("New user register [{$message->userId}]");
+        $this->command->info("New user register [{$msg->userId}]");
 
-            $this->users->put($conn->resourceId, (object) [
-                'userId' => $message->userId,
+        $user = User::query()->find($msg->userId);
+        if ($user) {
+            $this->users->put($conn->resourceId, (object)[
+                'userId' => $msg->userId,
                 'resourceId' => $conn->resourceId,
                 'connection' => $conn,
             ]);
         }
     }
 
-    private function message(ConnectionInterface $conn, $message)
+    private function message(ConnectionInterface $conn, $msg)
     {
-        $from = $this->users->get($conn->resourceId);
-        $to = $this->users->first(function ($user) use ($message) {
-            return $user->userId === $message->to;
+        $this->command->info("New message from [{$conn->resourceId}] to [{$msg->receiverId}] with content [{$msg->content}] at [{$msg->date}]!");
+
+        $senderWsUser = $this->users->get($conn->resourceId);
+        $receiverWsUser = $this->users->first(function ($user) use ($msg) {
+            return $user->userId === $msg->receiverId;
         });
 
-        if ($from && $to) {
-            $this->command->info("New message from [{$from->userId}] to [{$to->userId}] with content [{$message->content}] at [{$message->date}]!");
+        // Check if sender exits and if sender & receiver is different.
+        if ($senderWsUser && $senderWsUser->userId !== $msg->receiverId) {
+            /** @var User $senderUser */
+            $senderUser = User::query()->find($senderWsUser->userId);
+            /** @var User $receiverUser */
+            $receiverUser = User::query()->find($msg->receiverId);
 
-            $to->connection->send(json_encode([
-                'action' => 'message',
-                'from' => $from->userId,
-                'content' => $message->content,
-                'date' => $message->date,
-                'is_mine' => false,
-            ]));
+            // Check if sender & receiver exists in database.
+            if ($senderUser && $receiverUser) {
+                /** @var $message */
+                $message = Message::query()->create([
+                    'sender_id' => $senderUser->id,
+                    'receiver_id' => $receiverUser->id,
+                    'content' => $msg->content,
+                    'sent_at' => Carbon::make($msg->date),
+                ])->load('sender')->load('receiver');
+
+                $messageData = json_encode([
+                    'action' => 'message',
+                    'data' => $message,
+                ]);
+
+                // If receiver exists in websocket, send data.
+                if ($receiverWsUser) {
+                    $receiverWsUser->connection->send($messageData);
+                }
+
+                // Send data to sender
+                $senderWsUser->connection->send($messageData);
+            }
         }
     }
 }

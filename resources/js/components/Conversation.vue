@@ -1,183 +1,255 @@
 <template>
-    <div class="message_box">
-        <div class="message_list" ref="message_list">
-            <template v-for="message in messages">
-                <div class="message" :class="{ incoming: !message.is_mine }">
-                    <img v-if="!message.is_mine" src="https://ptetutorials.com/images/user-profile.png" alt="sunil">
-                    <div class="message_details">
-                        <div class="message_content">
-                            <p>{{ message.content }}</p>
-                            <span class="time_date">{{ (new Date(message.date)).toLocaleString() }}</span>
+    <div class="conversation_block">
+        <div class="conversation_box">
+            <div class="conversation_header">
+                <h4>Recent</h4>
+                <div class="dropdown float-right">
+                    <button class="btn no-shadow btn-secondary btn-sm dropdown-toggle" type="button" data-toggle="dropdown">
+                        <i class="fa fa-plus"></i>
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-right">
+                        <a class="dropdown-item" href="#" v-for="user in users" v-if="user.id !== userId" @click.prevent="createConversation(user.id, user.name)">{{ user.name }}</a>
+                    </div>
+                </div>
+            </div>
+            <div class="conversation_body">
+                <div class="conversation_list" v-for="conversation in conversations" :class="{ active: currentConversationId === conversation.id }" @click.prevent="changeConversation(conversation.id)">
+                    <div class="conversation_element">
+                        <img src="https://ptetutorials.com/images/user-profile.png" alt="sunil">
+                        <div class="conversation_details">
+                            <h5>{{ conversation.name }} <span>Dec 25</span></h5>
+                            <p><span class="badge badge-primary badge-pill" v-show="conversation.unread_message_count > 0">{{ conversation.unread_message_count }}</span> {{ conversation.last_message }}</p>
                         </div>
                     </div>
                 </div>
-            </template>
+            </div>
         </div>
-        <div class="message_input">
-            <input type="text" ref="message_input" title="message" placeholder="Type a message" v-model="message" @keyup.enter="handleSendMessage()">
-            <button type="button" @click.prevent="handleSendMessage()"><i class="fa fa-paper-plane-o" aria-hidden="true"></i></button>
-        </div>
+
+        <component
+                v-for="conversation in conversations"
+                v-show="currentConversationId === conversation.id"
+                :is="conversation.model"
+                :key="conversation.id"
+                :user-id="userId"
+                :receiver-id="conversation.receiverId"
+                :ws="ws"
+                @on-mounted="initConversation($event, conversation)"
+        ></component>
     </div>
 </template>
 
 <script>
+    import Message from './Message';
+    import UuidV4 from 'uuid/v4';
+
     export default {
         name: 'Conversation',
+        components: {
+            Message,
+        },
         props: {
+            userData: {
+                type: String,
+                required: true,
+            },
             userId: {
                 type: Number,
-                required: true,
-            },
-            toId: {
-                type: Number,
-                required: true,
-            },
-            ws: {
-                type: WebSocket,
                 required: true,
             },
         },
         data() {
             return {
-                message: '',
-                messages: [],
+                users: JSON.parse(this.userData),
+                ws: null,
+                currentConversationId: null,
+                conversations: [],
             };
         },
         mounted() {
-            this.$emit('on-mounted', this);
-
-            this.scrollToBottom();
+            this.ws = new WebSocket('ws://localhost:8090');
+            this.ws.onopen = this.onWsOpen;
+            this.ws.onmessage = this.onWsMessage;
         },
         methods: {
-            handleReceiveMessage(message) {
-                this.messages.push(message);
-
-                this.scrollToBottom();
+            onWsOpen(e) {
+                console.log('Connection established !');
+                this.ws.send(JSON.stringify({action: 'register', userId: this.userId}));
             },
-            handleSendMessage() {
-                if (!this.message) {
-                    return;
+            onWsMessage(e) {
+                let message = JSON.parse(e.data);
+                if (message.action) {
+                    switch (message.action) {
+                        case 'message':
+                            return this.onMessageAction(message.data);
+                    }
+                }
+            },
+            onMessageAction(message) {
+                let conversation = null;
+
+                if (message.sender_id !== this.userId) {
+                    conversation = this.conversations.find(co => co.receiverId === message.sender_id);
+                    if (!conversation) {
+                        conversation = {
+                            id: UuidV4(),
+                            name: message.receiver.name,
+                            receiverId: message.sender_id,
+                            model: Message,
+                            instance: null,
+                            unread_message_count: 0,
+                            last_message: '',
+                        };
+
+                        this.conversations.push(conversation);
+                    }
+
+                    if (conversation.id !== this.currentConversationId) {
+                        this.conversations = this.conversations.map((conv) => {
+                            if (conv.receiverId === message.sender_id) {
+                                conv.unread_message_count = conv.unread_message_count + 1;
+                                conv.last_message = message.content;
+                            }
+
+                            return conv;
+                        });
+                    }
+                } else {
+                    conversation = this.conversations.find(co => co.id === this.currentConversationId);
                 }
 
-                const message = {
-                    action: 'message',
-                    to: this.toId,
-                    content: this.message,
-                    date: new Date(),
-                    is_mine: true,
-                };
-
-                this.ws.send(JSON.stringify(message));
-
-                this.messages.push(message);
-
-                this.message = '';
-                this.$refs.message_input.focus();
-
-                this.scrollToBottom();
-            },
-            scrollToBottom() {
                 this.$nextTick(() => {
-                    this.$refs.message_list.scrollTop = this.$refs.message_list.scrollHeight;
+                    if (conversation && conversation.instance) {
+                        conversation.instance.handleReceiveMessage(message);
+                    }
                 });
+
+            },
+            changeConversation(conversationId) {
+                this.conversations = this.conversations.map((conversation) => {
+                    if (conversation.id === conversationId) {
+                        conversation.unread_message_count = 0;
+
+                        if (conversation.instance) {
+                            conversation.instance.scrollToBottom();
+                        }
+                    }
+
+                    return conversation;
+                });
+
+                this.currentConversationId = conversationId;
+            },
+            initConversation(instance, conversation) {
+                conversation.instance = instance;
+            },
+            createConversation(receiverId, name) {
+                let conversation = this.conversations.find(co => co.receiverId === receiverId);
+                if (!conversation) {
+                    conversation = {
+                        id: UuidV4(),
+                        name: name,
+                        receiverId: receiverId,
+                        model: Message,
+                        instance: null,
+                        unread_message_count: 0,
+                        last_message: '',
+                    };
+
+                    this.conversations.push(conversation);
+                }
+
+                this.changeConversation(conversation.id);
             },
         },
     }
 </script>
 
 <style lang="scss" scoped>
-    .message_box {
-        float: left;
-        padding: 30px 15px 0 15px;
-        width: 60%;
+    .no-shadow {
+        -webkit-box-shadow: none !important;
+        -moz-box-shadow: none !important;
+        box-shadow: none !important;
+    }
 
-        .message_list {
-            height: 516px;
-            overflow-y: auto;
+    img {
+        max-width: 100%;
+    }
 
-            .message {
-                margin: 13px 0 13px;
-                overflow: hidden;
+    .conversation_block {
+        border: 1px solid #c4c4c4;
+        clear: both;
+        overflow: hidden;
 
-                .message_content {
-                    float: right;
-                    width: 50%;
+        .conversation_box {
+            background: #f8f8f8 none repeat scroll 0 0;
+            float: left;
+            overflow: hidden;
+            width: 40%;
+            border-right: 1px solid #c4c4c4;
 
-                    p {
-                        background: #05728f none repeat scroll 0 0;
-                        border-radius: 3px;
-                        font-size: 14px;
-                        margin: 0;
-                        color: #fff;
-                        padding: 5px 10px 5px 12px;
-                        width: 100%;
-                    }
+            .conversation_header {
+                padding: 10px 29px 10px 20px;
+                border-bottom: 1px solid #c4c4c4;
 
-                    .time_date {
-                        color: #747474;
-                        display: block;
-                        font-size: 12px;
-                        margin: 8px 0 0;
-                        float: right;
-                    }
-                }
-
-                &.incoming {
-                    img {
-                        display: inline-block;
-                        width: 6%;
-                    }
-
-                    .message_details {
-                        display: inline-block;
-                        padding: 0 0 0 10px;
-                        vertical-align: top;
-                        width: 92%;
-                    }
-
-                    .message_content {
-                        float: none;
-
-                        p {
-                            background-color: #ebebeb;
-                            color: #646464;
-                        }
-
-                        .time_date {
-                            float: none;
-                        }
-                    }
+                h4 {
+                    color: #05728f;
+                    font-size: 23px;
+                    margin: auto;
+                    display: inline-block;
                 }
             }
-        }
 
-        .message_input {
-            border-top: 1px solid #c4c4c4;
-            position: relative;
+            .conversation_body {
+                height: 550px;
+                overflow-y: scroll;
 
-            input {
-                background: rgba(0, 0, 0, 0) none repeat scroll 0 0;
-                border: medium none;
-                color: #4c4c4c;
-                font-size: 15px;
-                min-height: 48px;
-                width: 100%;
-                outline: none;
-            }
+                .conversation_list {
+                    border-bottom: 1px solid #c4c4c4;
+                    margin: 0;
+                    padding: 18px 16px 10px;
 
-            button {
-                background: #05728f none repeat scroll 0 0;
-                border: medium none;
-                border-radius: 50%;
-                color: #fff;
-                cursor: pointer;
-                font-size: 17px;
-                height: 33px;
-                position: absolute;
-                right: 0;
-                top: 8px;
-                width: 33px;
-                outline: none;
+                    &:hover {
+                        background: #ebebeb;
+                        cursor: pointer;
+                    }
+
+                    &.active {
+                        background: #ebebeb;
+                    }
+
+                    .conversation_element {
+                        overflow: hidden;
+                        clear: both;
+
+                        img {
+                            float: left;
+                            width: 11%;
+                        }
+
+                        .conversation_details {
+                            float: left;
+                            padding: 0 0 0 15px;
+                            width: 88%;
+
+                            p {
+                                font-size: 14px;
+                                color: #989898;
+                                margin: auto
+                            }
+
+                            h5 {
+                                font-size: 15px;
+                                color: #464646;
+                                margin: 0 0 8px 0;
+
+                                span {
+                                    font-size: 13px;
+                                    float: right;
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
