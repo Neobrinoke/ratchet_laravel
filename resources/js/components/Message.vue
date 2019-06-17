@@ -45,7 +45,6 @@
         },
         mounted() {
             axios.get('messages?receiver_id=' + this.receiverId).then((res) => {
-                console.log('mounted');
                 this.messages = res.data;
             }).catch((err) => {
                 console.error(err);
@@ -57,7 +56,6 @@
         },
         methods: {
             handleReceiveMessage(message) {
-                console.log('handleReceiveMessage');
                 this.messages.push(message);
 
                 this.scrollToBottom();
