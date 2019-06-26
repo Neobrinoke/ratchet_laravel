@@ -95,12 +95,12 @@ class Controller implements MessageComponentInterface
             return;
         }
 
-        foreach ($this->chats as $chatId => $chat) {
-            if (in_array($webSocketUser, $chat['members'])) {
-                unset($this->chats[$chatId]->members[$webSocketUser->id]);
-            }
+        // unset closed member in all chats.
+        foreach ($this->chats as &$chat) {
+            unset($chat->members[$webSocketUser->id]);
         }
 
+        // unset closed user in users array.
         unset($this->users[$webSocketUser->resourceId]);
     }
 
