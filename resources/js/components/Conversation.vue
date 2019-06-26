@@ -180,6 +180,8 @@
 
                 this.chatName = '';
                 this.chatMembers = [];
+
+                $('#newChatModal').modal('hide');
             },
         },
     }
