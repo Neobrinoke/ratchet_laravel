@@ -162,7 +162,6 @@
                 if (this.currentChat.instance) {
                     this.currentChat.instance.scrollToBottom();
                 }
-
             },
             initChat(instance, chat) {
                 chat.instance = instance;
