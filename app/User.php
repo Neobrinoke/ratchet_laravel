@@ -5,6 +5,7 @@ namespace App;
 use Carbon\Carbon;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Support\Collection;
 
 /**
  * Class User
@@ -16,10 +17,12 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
  * @property Carbon email_verified_at
  * @property string password
  * @property string remember_token
+ * @property string profile_picture_url
  * @property Carbon created_at
  * @property Carbon updated_at
  *
- * @property string profile_picture
+ * @property Collection|Chat[] chats
+ * @property ChatUser chat_pivot
  */
 class User extends Authenticatable
 {
@@ -43,18 +46,18 @@ class User extends Authenticatable
         'email_verified_at' => 'datetime',
     ];
 
-    /** @var array */
-    protected $appends = [
-        'profile_picture',
-    ];
-
     /**
-     * Return url of profile picture for this user.
+     * Return all chats for this user.
      *
-     * @return string
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany|Chat
      */
-    public function getProfilePictureAttribute(): string
+    public function chats()
     {
-        return 'https://ptetutorials.com/images/user-profile.png';
+        return $this->belongsToMany(Chat::class)
+            ->orderByDesc('updated_at')
+            ->using(ChatUser::class)
+            ->as('member_pivot')
+            ->withPivot('id', 'last_exposed_at')
+            ->withTimestamps();
     }
 }

@@ -17,9 +17,6 @@ use Illuminate\Support\Facades\Route;
 Auth::routes();
 
 Route::middleware('auth')->group(function () {
-    Route::get('/', function () {
-        return view('home');
-    });
-
+    Route::get('/', 'HomeController@index')->name('home');
     Route::get('/messages', 'MessageController@index')->name('messages.index');
 });

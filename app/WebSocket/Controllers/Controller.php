@@ -2,8 +2,10 @@
 
 namespace App\WebSocket\Controllers;
 
+use App\Chat;
 use App\Message;
 use App\User;
+use App\WebSocket\User as WebSocketUser;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Ratchet\ConnectionInterface;
@@ -12,26 +14,25 @@ use SplObjectStorage;
 
 class Controller implements MessageComponentInterface
 {
-    protected $clients;
-//    private $subscriptions;
-//    private $users;
-//    private $userresources;
-    private $command;
+    private const ACTION_REGISTER_USER = 'register_user';
+    private const ACTION_REGISTER_CHAT = 'register_chat';
+    private const ACTION_CREATE_CHAT = 'create_chat';
+    private const ACTION_SEND_CHAT_MESSAGE = 'send_chat_message';
+    private const ACTION_RECEIVE_MESSAGE = 'receive_message';
 
-    private $channels;
-    private $users;
+    protected $clients;
+
+    private $command = null;
+    private $chats = [];
+
+    /** @var WebSocketUser[] */
+    private $users = [];
 
     public function __construct(Command $command)
     {
         $this->clients = new SplObjectStorage;
-//        $this->subscriptions = [];
-//        $this->users = [];
-//        $this->userresources = [];
+
         $this->command = $command;
-
-        $this->channels = collect();
-        $this->users = collect();
-
         $this->command->info('Server start !');
     }
 
@@ -45,83 +46,42 @@ class Controller implements MessageComponentInterface
     public function onMessage(ConnectionInterface $conn, $msg)
     {
         $msg = json_decode($msg);
-        if (isset($msg->action)) {
-            switch ($msg->action) {
-                case 'register':
-                    $this->register($conn, $msg);
-                    break;
-                case 'message':
-                    $this->message($conn, $msg);
-                    break;
+        if (!$msg->action) {
+            return;
+        }
+
+        /** @var Chat|null $chat */
+        $chat = null;
+
+        $webSocketUser = null;
+        if ($msg->action !== self::ACTION_REGISTER_USER) {
+            $webSocketUser = $this->users[$conn->resourceId];
+            if (!$webSocketUser) {
+                return;
             }
         }
 
-//        $data = json_decode($msg);
-//        if (isset($data->command)) {
-//            switch ($data->command) {
-//                case 'subscribe':
-//                    $this->subscriptions[$conn->resourceId] = $data->channel;
-//                    break;
+        if (in_array($msg->action, [self::ACTION_REGISTER_CHAT, self::ACTION_SEND_CHAT_MESSAGE])) {
+            $chat = Chat::query()->find($msg->chatId);
+            if (!$chat) {
+                return;
+            }
+        }
 
-//                case 'groupchat':
-//                    if (isset($this->subscriptions[$conn->resourceId])) {
-//                        $target = $this->subscriptions[$conn->resourceId];
-//                        foreach ($this->subscriptions as $id => $channel) {
-//                            if ($channel == $target && $id != $conn->resourceId) {
-//                                $this->users[$id]->send($data->message);
-//                            }
-//                        }
-//                    }
-//                    break;
-
-//                case 'message':
-//                    if (isset($this->userresources[$data->to])) {
-//                        foreach ($this->userresources[$data->to] as $key => $resourceId) {
-//                            if (isset($this->users[$resourceId])) {
-//                                $this->users[$resourceId]->send($msg);
-//                            }
-//                        }
-//                        $conn->send(json_encode($this->userresources[$data->to]));
-//                    }
-//
-//                    if (isset($this->userresources[$data->from])) {
-//                        foreach ($this->userresources[$data->from] as $key => $resourceId) {
-//                            if (isset($this->users[$resourceId]) && $conn->resourceId != $resourceId) {
-//                                $this->users[$resourceId]->send($msg);
-//                            }
-//                        }
-//                    }
-//                    break;
-
-//                case 'register':
-//                    if (isset($data->userId)) {
-//                        if (isset($this->userresources[$data->userId])) {
-//                            if (!in_array($conn->resourceId, $this->userresources[$data->userId])) {
-//                                $this->userresources[$data->userId][] = $conn->resourceId;
-//                            }
-//                        } else {
-//                            $this->userresources[$data->userId] = [];
-//                            $this->userresources[$data->userId][] = $conn->resourceId;
-//                        }
-//                    }
-//
-//                    $conn->send(json_encode($this->users));
-//                    $conn->send(json_encode($this->userresources));
-//                    break;
-
-//                default:
-//                    $example = [
-//                        'methods' => [
-//                            "subscribe" => '{command: "subscribe", channel: "global"}',
-//                            "groupchat" => '{command: "groupchat", message: "hello glob", channel: "global"}',
-//                            "message" => '{command: "message", to: "1", message: "it needs xss protection"}',
-//                            "register" => '{command: "register", userId: 9}',
-//                        ],
-//                    ];
-//                    $conn->send(json_encode($example));
-//                    break;
-//            }
-//        }
+        switch ($msg->action) {
+            case self::ACTION_REGISTER_USER:
+                $this->registerUser($conn, $msg);
+                break;
+            case self::ACTION_REGISTER_CHAT:
+                $this->registerChat($webSocketUser, $chat);
+                break;
+            case self::ACTION_CREATE_CHAT:
+                $this->createChat($webSocketUser, $msg);
+                break;
+            case self::ACTION_SEND_CHAT_MESSAGE:
+                $this->sendChatMessage($webSocketUser, $chat, $msg);
+                break;
+        }
     }
 
     public function onClose(ConnectionInterface $conn)
@@ -130,16 +90,18 @@ class Controller implements MessageComponentInterface
 
         $this->command->info("Connection [{$conn->resourceId}] has disconnected");
 
-        unset($this->users[$conn->resourceId]);
-//        unset($this->subscriptions[$conn->resourceId]);
-//
-//        foreach ($this->userresources as &$userId) {
-//            foreach ($userId as $key => $resourceId) {
-//                if ($resourceId == $conn->resourceId) {
-//                    unset($userId[$key]);
-//                }
-//            }
-//        }
+        $webSocketUser = $this->users[$conn->resourceId];
+        if (!$webSocketUser) {
+            return;
+        }
+
+        foreach ($this->chats as $chatId => $chat) {
+            if (in_array($webSocketUser, $chat['members'])) {
+                unset($this->chats[$chatId]->members[$webSocketUser->id]);
+            }
+        }
+
+        unset($this->users[$webSocketUser->resourceId]);
     }
 
     public function onError(ConnectionInterface $conn, \Exception $e)
@@ -149,59 +111,87 @@ class Controller implements MessageComponentInterface
         $conn->close();
     }
 
-    private function register(ConnectionInterface $conn, $msg)
+    private function registerUser(ConnectionInterface $conn, $msg)
     {
+        $user = User::query()->find($msg->userId);
+        if (!$user) {
+            return;
+        }
+
         $this->command->info("New user register [{$msg->userId}]");
 
-        $user = User::query()->find($msg->userId);
-        if ($user) {
-            $this->users->put($conn->resourceId, (object)[
-                'userId' => $msg->userId,
-                'resourceId' => $conn->resourceId,
-                'connection' => $conn,
-            ]);
+        $this->users[$conn->resourceId] = new WebSocketUser($msg->userId, $conn->resourceId, $conn);
+    }
+
+    private function registerChat(WebSocketUser $webSocketUser, Chat $chat)
+    {
+        if (!isset($this->chats[$chat->id])) {
+            $this->chats[$chat->id] = (object)[
+                'members' => [],
+            ];
+        }
+
+        $this->chats[$chat->id]->members[$webSocketUser->id] = &$webSocketUser;
+    }
+
+    private function createChat(WebSocketUser $webSocketUser, $msg)
+    {
+        /** @var Chat $chat */
+        $chat = Chat::query()->create([
+            'admin_id' => $webSocketUser->id,
+            'name' => $msg->chatName,
+        ]);
+
+        $members = [];
+        if (!empty($msg->chatMembers)) {
+            $users = User::query()->findMany($msg->chatMembers);
+            $members = $users->pluck('id');
+        }
+
+        $members[] = $webSocketUser->id;
+
+        $chat->members()->sync($members);
+
+        $chat->load('members');
+        $chat->load('messages');
+
+        foreach ($members as $member) {
+            foreach ($this->users as $user) {
+                if ($user->id === $member) {
+                    $this->registerChat($user, $chat);
+
+                    $user->conn->send(json_encode([
+                        'action' => self::ACTION_CREATE_CHAT,
+                        'data' => $chat,
+                    ]));
+                }
+            }
         }
     }
 
-    private function message(ConnectionInterface $conn, $msg)
+    private function sendChatMessage(WebSocketUser $webSocketUser, Chat $chat, $msg)
     {
-        $this->command->info("New message from [{$conn->resourceId}] to [{$msg->receiverId}] with content [{$msg->content}] at [{$msg->date}]!");
+        $this->command->info("New message from [{$webSocketUser->id}] to chat [{$chat->id}] with content [{$msg->content}] at [{$msg->date}]!");
 
-        $senderWsUser = $this->users->get($conn->resourceId);
-        $receiverWsUser = $this->users->first(function ($user) use ($msg) {
-            return $user->userId === $msg->receiverId;
-        });
+        /** @var Message $newMessage */
+        $newMessage = $chat->messages()->create([
+            'sender_id' => $webSocketUser->id,
+            'content' => $msg->content,
+            'sent_at' => Carbon::make($msg->date)->timezone(env('APP_TIMEZONE')),
+        ]);
 
-        // Check if sender exits and if sender & receiver is different.
-        if ($senderWsUser && $senderWsUser->userId !== $msg->receiverId) {
-            /** @var User $senderUser */
-            $senderUser = User::query()->find($senderWsUser->userId);
-            /** @var User $receiverUser */
-            $receiverUser = User::query()->find($msg->receiverId);
+        $newMessage->load('sender');
 
-            // Check if sender & receiver exists in database.
-            if ($senderUser && $receiverUser) {
-                /** @var $message */
-                $message = Message::query()->create([
-                    'sender_id' => $senderUser->id,
-                    'receiver_id' => $receiverUser->id,
-                    'content' => $msg->content,
-                    'sent_at' => Carbon::make($msg->date),
-                ])->load('sender')->load('receiver');
+        $chat->touch();
 
-                $messageData = json_encode([
-                    'action' => 'message',
-                    'data' => $message,
-                ]);
+        $messageData = json_encode([
+            'action' => self::ACTION_RECEIVE_MESSAGE,
+            'data' => $newMessage,
+        ]);
 
-                // If receiver exists in websocket, send data.
-                if ($receiverWsUser) {
-                    $receiverWsUser->connection->send($messageData);
-                }
-
-                // Send data to sender
-                $senderWsUser->connection->send($messageData);
-            }
+        /** @var WebSocketUser $member */
+        foreach ($this->chats[$chat->id]->members as $member) {
+            $member->conn->send($messageData);
         }
     }
 }

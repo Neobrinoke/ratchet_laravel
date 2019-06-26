@@ -1,9 +1,9 @@
 <template>
     <div class="message_box">
         <div class="message_list" ref="message_list">
-            <template v-for="message in messages">
-                <div class="message" :class="{ incoming: message.receiver_id === userId }">
-                    <img v-if="message.receiver_id === userId" src="https://ptetutorials.com/images/user-profile.png" alt="sunil">
+            <template v-for="message in chat.messages">
+                <div class="message" :class="{ incoming: message.sender_id !== currentUser.id }">
+                    <img v-if="message.sender_id !== currentUser.id" :src="message.sender.profile_picture_url" alt="sunil">
                     <div class="message_details">
                         <div class="message_content">
                             <p>{{ message.content }}</p>
@@ -21,18 +21,21 @@
 </template>
 
 <script>
+    const ACTION_REGISTER_CHAT = 'register_chat';
+    const ACTION_SEND_CHAT_MESSAGE = 'send_chat_message';
+
     export default {
-        name: 'Message',
+        name: 'Chat',
         props: {
-            userId: {
-                type: Number,
+            chat: {
+                type: Object,
                 required: true,
             },
-            receiverId: {
-                type: Number,
+            currentUser: {
+                type: Object,
                 required: true,
             },
-            ws: {
+            wsInstance: {
                 type: WebSocket,
                 required: true,
             },
@@ -40,23 +43,21 @@
         data() {
             return {
                 message: '',
-                messages: [],
             };
         },
         mounted() {
-            axios.get('messages?receiver_id=' + this.receiverId).then((res) => {
-                this.messages = res.data;
-            }).catch((err) => {
-                console.error(err);
-            }).then(() => {
-                this.scrollToBottom();
+            this.scrollToBottom();
 
-                this.$emit('on-mounted', this);
-            });
+            this.wsInstance.send(JSON.stringify({
+                action: ACTION_REGISTER_CHAT,
+                chatId: this.chat.id,
+            }));
+
+            this.$emit('on-mounted', this);
         },
         methods: {
             handleReceiveMessage(message) {
-                this.messages.push(message);
+                this.chat.messages.push(message);
 
                 this.scrollToBottom();
             },
@@ -65,9 +66,9 @@
                     return;
                 }
 
-                this.ws.send(JSON.stringify({
-                    action: 'message',
-                    receiverId: this.receiverId,
+                this.wsInstance.send(JSON.stringify({
+                    action: ACTION_SEND_CHAT_MESSAGE,
+                    chatId: this.chat.id,
                     content: this.message,
                     date: new Date(),
                 }));

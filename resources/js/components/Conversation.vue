@@ -1,164 +1,185 @@
 <template>
-    <div class="conversation_block">
+    <div class="conversation_block" v-if="wsInstance && ready">
         <div class="conversation_box">
             <div class="conversation_header">
-                <h4>Recent</h4>
-                <div class="dropdown float-right">
-                    <button class="btn no-shadow btn-secondary btn-sm dropdown-toggle" type="button" data-toggle="dropdown">
-                        <i class="fa fa-plus"></i>
-                    </button>
-                    <div class="dropdown-menu dropdown-menu-right">
-                        <a class="dropdown-item" href="#" v-for="user in users" v-if="user.id !== userId" @click.prevent="createConversation(user.id, user.name)">{{ user.name }}</a>
-                    </div>
-                </div>
+                <h4>Vos conversations</h4>
+                <button class="btn no-shadow btn-secondary btn-sm float-right" type="button" data-toggle="modal" data-target="#newChatModal">
+                    <i class="fa fa-plus"></i>
+                </button>
             </div>
             <div class="conversation_body">
-                <div class="conversation_list" v-for="conversation in conversations" :class="{ active: currentConversationId === conversation.id }" @click.prevent="changeConversation(conversation.id)">
+                <div class="conversation_list" v-for="chat in chats" :class="{ active: currentChat && currentChat.id === chat.id }" @click.prevent="changeChat(chat)">
                     <div class="conversation_element">
                         <img src="https://ptetutorials.com/images/user-profile.png" alt="sunil">
                         <div class="conversation_details">
-                            <h5>{{ conversation.name }} <span>Dec 25</span></h5>
-                            <p><span class="badge badge-primary badge-pill" v-show="conversation.unread_message_count > 0">{{ conversation.unread_message_count }}</span> {{ conversation.last_message }}</p>
+                            <h5>{{ chat.name }} <span>Dec 25</span></h5>
+                            <p v-show="chat.unread_message_count > 0"><span class="badge badge-primary badge-pill">{{ chat.unread_message_count }}</span> {{ chat.last_message }}</p>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <component
-                v-for="conversation in conversations"
-                v-show="currentConversationId === conversation.id"
-                :is="conversation.model"
-                :key="conversation.id"
-                :user-id="userId"
-                :receiver-id="conversation.receiverId"
-                :ws="ws"
-                @on-mounted="initConversation($event, conversation)"
-        ></component>
+        <chat
+                v-for="chat in chats"
+                v-show="currentChat && currentChat.id === chat.id"
+                :key="chat.id"
+                :chat="chat"
+                :current-user="currentUser"
+                :ws-instance="wsInstance"
+                @on-mounted="initChat($event, chat)"
+        ></chat>
+
+        <div class="modal" id="newChatModal">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h4 class="modal-title">Nouveau chat</h4>
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label for="chat_name">Nom du chat</label>
+                            <input type="text" id="chat_name" class="form-control" v-model="chatName">
+                        </div>
+                        <div class="form-group">
+                            <label for="chat_members">Sélectionnez des membres à ajouter au chat</label>
+                            <select id="chat_members" class="form-control" v-model="chatMembers" multiple>
+                                <option v-for="user in users" v-if="user.id !== currentUser.id" :value="user.id">{{ user.name }}</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-danger" data-dismiss="modal">Annuler</button>
+                        <button type="button" class="btn btn-success" @click.prevent="createChat()">Créer le chat</button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </template>
 
 <script>
-    import Message from './Message';
-    import UuidV4 from 'uuid/v4';
+    const ACTION_REGISTER_USER = 'register_user';
+    const ACTION_CREATE_CHAT = 'create_chat';
+    const ACTION_RECEIVE_MESSAGE = 'receive_message';
+
+    import Chat from './Chat';
 
     export default {
         name: 'Conversation',
         components: {
-            Message,
+            Chat,
         },
         props: {
+            currentUserData: {
+                type: String,
+                required: true,
+            },
             userData: {
                 type: String,
                 required: true,
             },
-            userId: {
-                type: Number,
+            chatData: {
+                type: String,
                 required: true,
             },
         },
         data() {
             return {
+                currentUser: JSON.parse(this.currentUserData),
                 users: JSON.parse(this.userData),
-                ws: null,
-                currentConversationId: null,
-                conversations: [],
+                chats: JSON.parse(this.chatData),
+                wsInstance: null,
+                ready: false,
+                currentChat: null,
+                chatName: '',
+                chatMembers: [],
             };
         },
         mounted() {
-            this.ws = new WebSocket('ws://localhost:8090');
-            this.ws.onopen = this.onWsOpen;
-            this.ws.onmessage = this.onWsMessage;
+            this.wsInstance = new WebSocket('ws://localhost:8090');
+            this.wsInstance.onopen = this.onWsOpen;
+            this.wsInstance.onmessage = this.onWsMessage;
+
+            this.chats = this.chats.map((chat) => {
+                chat.instance = null;
+                chat.last_message = '';
+                chat.unread_message_count = 0;
+
+                return chat;
+            });
         },
         methods: {
             onWsOpen(e) {
                 console.log('Connection established !');
-                this.ws.send(JSON.stringify({action: 'register', userId: this.userId}));
+
+                this.wsInstance.send(JSON.stringify({
+                    action: ACTION_REGISTER_USER,
+                    userId: this.currentUser.id
+                }));
+
+                this.ready = true;
             },
             onWsMessage(e) {
                 let message = JSON.parse(e.data);
                 if (message.action) {
                     switch (message.action) {
-                        case 'message':
-                            return this.onMessageAction(message.data);
+                        case ACTION_RECEIVE_MESSAGE:
+                            return this.onReceiveMessage(message.data);
+                        case ACTION_CREATE_CHAT:
+                            return this.onCreateChat(message.data);
                     }
                 }
             },
-            onMessageAction(message) {
-                let conversation = null;
-
-                if (message.sender_id !== this.userId) {
-                    conversation = this.conversations.find(co => co.receiverId === message.sender_id);
-                    if (!conversation) {
-                        conversation = {
-                            id: UuidV4(),
-                            name: message.receiver.name,
-                            receiverId: message.sender_id,
-                            model: Message,
-                            instance: null,
-                            unread_message_count: 0,
-                            last_message: '',
-                        };
-
-                        this.conversations.push(conversation);
-                    }
-
-                    if (conversation.id !== this.currentConversationId) {
-                        this.conversations = this.conversations.map((conv) => {
-                            if (conv.receiverId === message.sender_id) {
-                                conv.unread_message_count = conv.unread_message_count + 1;
-                                conv.last_message = message.content;
-                            }
-
-                            return conv;
-                        });
-                    }
+            onReceiveMessage(message) {
+                if (this.currentChat && this.currentChat.id === message.chat_id) {
+                    this.currentChat.instance.handleReceiveMessage(message);
                 } else {
-                    conversation = this.conversations.find(co => co.id === this.currentConversationId);
-                }
-
-                this.$nextTick(() => {
-                    if (conversation && conversation.instance) {
-                        conversation.instance.handleReceiveMessage(message);
-                    }
-                });
-
-            },
-            changeConversation(conversationId) {
-                this.conversations = this.conversations.map((conversation) => {
-                    if (conversation.id === conversationId) {
-                        conversation.unread_message_count = 0;
-
-                        if (conversation.instance) {
-                            conversation.instance.scrollToBottom();
+                    this.chats = this.chats.map((chat) => {
+                        if (chat.id === message.chat_id) {
+                            chat.last_message = message.content;
+                            chat.unread_message_count = chat.unread_message_count + 1;
+                            chat.instance.handleReceiveMessage(message);
                         }
-                    }
 
-                    return conversation;
-                });
-
-                this.currentConversationId = conversationId;
+                        return chat;
+                    });
+                }
             },
-            initConversation(instance, conversation) {
-                conversation.instance = instance;
-            },
-            createConversation(receiverId, name) {
-                let conversation = this.conversations.find(co => co.receiverId === receiverId);
-                if (!conversation) {
-                    conversation = {
-                        id: UuidV4(),
-                        name: name,
-                        receiverId: receiverId,
-                        model: Message,
-                        instance: null,
-                        unread_message_count: 0,
-                        last_message: '',
-                    };
+            onCreateChat(chat) {
+                chat.instance = null;
+                chat.last_message = '';
+                chat.unread_message_count = 0;
 
-                    this.conversations.push(conversation);
+                this.chats.unshift(chat);
+            },
+            changeChat(nextChat) {
+                nextChat.last_message = '';
+                nextChat.unread_message_count = 0;
+
+                this.currentChat = nextChat;
+                if (this.currentChat.instance) {
+                    this.currentChat.instance.scrollToBottom();
                 }
 
-                this.changeConversation(conversation.id);
+            },
+            initChat(instance, chat) {
+                chat.instance = instance;
+            },
+            createChat() {
+                if (!this.chatName) {
+                    return;
+                }
+
+                this.wsInstance.send(JSON.stringify({
+                    action: ACTION_CREATE_CHAT,
+                    chatName: this.chatName,
+                    chatMembers: this.chatMembers,
+                }));
+
+                this.chatName = '';
+                this.chatMembers = [];
             },
         },
     }
