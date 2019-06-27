@@ -104,6 +104,7 @@
 
             this.chats = this.chats.map((chat) => {
                 chat.instance = null;
+                chat.is_load = false;
                 chat.last_message = '';
                 chat.unread_message_count = 0;
 
@@ -116,7 +117,7 @@
 
                 this.wsInstance.send(JSON.stringify({
                     action: ACTION_REGISTER_USER,
-                    userId: this.currentUser.id
+                    userId: this.currentUser.id,
                 }));
 
                 this.ready = true;
@@ -135,17 +136,27 @@
             onReceiveMessage(message) {
                 if (this.currentChat && this.currentChat.id === message.chat_id) {
                     this.currentChat.instance.handleReceiveMessage(message);
+                    this.currentChat.updated_at = message.created_at;
                 } else {
                     this.chats = this.chats.map((chat) => {
                         if (chat.id === message.chat_id) {
                             chat.last_message = message.content;
                             chat.unread_message_count = chat.unread_message_count + 1;
-                            chat.instance.handleReceiveMessage(message);
+                            chat.updated_at = message.created_at;
+
+                            if (chat.is_load) {
+                                chat.instance.handleReceiveMessage(message);
+                            }
                         }
 
                         return chat;
                     });
                 }
+
+                // Reorder chats for sorted by updated_at.
+                this.chats = this.chats.sort((a, b) => {
+                    return new Date(b.updated_at) - new Date(a.updated_at);
+                });
             },
             onCreateChat(chat) {
                 chat.instance = null;
@@ -159,8 +170,8 @@
                 nextChat.unread_message_count = 0;
 
                 this.currentChat = nextChat;
-                if (this.currentChat.instance) {
-                    this.currentChat.instance.scrollToBottom();
+                if (!this.currentChat.is_load && this.currentChat.instance) {
+                    this.currentChat.instance.loadMessages();
                 }
             },
             initChat(instance, chat) {
