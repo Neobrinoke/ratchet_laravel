@@ -27,6 +27,7 @@
                 :chat="chat"
                 :current-user="currentUser"
                 :ws-instance="wsInstance"
+                :users="users"
                 @on-mounted="initChat($event, chat)"
         ></chat>
 
@@ -40,11 +41,11 @@
                     <div class="modal-body">
                         <div class="form-group">
                             <label for="chat_name">Nom du chat</label>
-                            <input type="text" id="chat_name" class="form-control" v-model="chatName">
+                            <input type="text" id="chat_name" class="form-control" v-model="newChatName">
                         </div>
                         <div class="form-group">
                             <label for="chat_members">Sélectionnez des membres à ajouter au chat</label>
-                            <select id="chat_members" class="form-control" v-model="chatMembers" multiple>
+                            <select id="chat_members" class="form-control" v-model="newChatMembers" multiple>
                                 <option v-for="user in users" v-if="user.id !== currentUser.id" :value="user.id">{{ user.name }}</option>
                             </select>
                         </div>
@@ -63,6 +64,7 @@
     const ACTION_REGISTER_USER = 'register_user';
     const ACTION_CREATE_CHAT = 'create_chat';
     const ACTION_RECEIVE_MESSAGE = 'receive_message';
+    const ACTION_RECEIVE_NOTIFICATION = 'receive_notification';
 
     import Chat from './Chat';
 
@@ -93,8 +95,8 @@
                 wsInstance: null,
                 ready: false,
                 currentChat: null,
-                chatName: '',
-                chatMembers: [],
+                newChatName: '',
+                newChatMembers: [],
             };
         },
         mounted() {
@@ -117,19 +119,21 @@
 
                 this.wsInstance.send(JSON.stringify({
                     action: ACTION_REGISTER_USER,
-                    userId: this.currentUser.id,
+                    user_id: this.currentUser.id,
                 }));
 
                 this.ready = true;
             },
             onWsMessage(e) {
-                let message = JSON.parse(e.data);
-                if (message.action) {
-                    switch (message.action) {
+                let data = JSON.parse(e.data);
+                if (data.action) {
+                    switch (data.action) {
                         case ACTION_RECEIVE_MESSAGE:
-                            return this.onReceiveMessage(message.data);
+                            return this.onReceiveMessage(data.message);
+                        case ACTION_RECEIVE_NOTIFICATION:
+                            return this.onReceiveNotification(data.notification);
                         case ACTION_CREATE_CHAT:
-                            return this.onCreateChat(message.data);
+                            return this.onCreateChat(data.chat);
                     }
                 }
             },
@@ -158,10 +162,31 @@
                     return new Date(b.updated_at) - new Date(a.updated_at);
                 });
             },
+            onReceiveNotification(notification) {
+                this.chats = this.chats.map((chat) => {
+                    if (chat.id === notification.chat_id) {
+                        chat.last_message = notification.content;
+                        chat.unread_message_count = chat.unread_message_count + 1;
+                        chat.updated_at = notification.created_at;
+
+                        if (chat.is_load) {
+                            chat.instance.handleReceiveNotification(notification);
+                        }
+                    }
+
+                    return chat;
+                });
+
+                // Reorder chats for sorted by updated_at.
+                this.chats = this.chats.sort((a, b) => {
+                    return new Date(b.updated_at) - new Date(a.updated_at);
+                });
+            },
             onCreateChat(chat) {
                 chat.instance = null;
                 chat.last_message = '';
                 chat.unread_message_count = 0;
+                chat.is_load = false;
 
                 this.chats.unshift(chat);
             },
@@ -178,18 +203,18 @@
                 chat.instance = instance;
             },
             createChat() {
-                if (!this.chatName) {
+                if (!this.newChatName) {
                     return;
                 }
 
                 this.wsInstance.send(JSON.stringify({
                     action: ACTION_CREATE_CHAT,
-                    chatName: this.chatName,
-                    chatMembers: this.chatMembers,
+                    name: this.newChatName,
+                    members: this.newChatMembers,
                 }));
 
-                this.chatName = '';
-                this.chatMembers = [];
+                this.newChatName = '';
+                this.newChatMembers = [];
 
                 $('#newChatModal').modal('hide');
             },
