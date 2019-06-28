@@ -11,7 +11,14 @@
                 <semipolar-spinner v-if="loading" style="margin: 0 auto;" :animation-duration="1000" :size="65" color="#05728f"/>
 
                 <template v-for="message in messages">
-                    <div class="message" :class="{ incoming: message.sender_id !== currentUser.id }">
+                    <div class="message" v-if="!message.sender_id">
+                        <div class="message_details">
+                            <div class="message_content">
+                                <p>{{ message.content }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="message" :class="{ incoming: message.sender_id !== currentUser.id }" v-else>
                         <img v-if="message.sender_id !== currentUser.id" :src="message.sender.profile_picture_url" alt="sunil">
                         <div class="message_details">
                             <div class="message_content">
@@ -116,6 +123,27 @@
                 this.scrollToBottom();
             },
             handleReceiveNotification(notification) {
+                let content = '';
+
+                notification.members.forEach((member) => {
+                    if (notification.new_members.includes(member.id)) {
+                        content += member.name + (notification.new_members.length === 1 ? ' ' : ', ');
+                    }
+                });
+
+                content += (notification.new_members.length === 1 ? ' a rejoint ' : ' ont rejoints ') + 'le chat !';
+
+                const message = {
+                    id: null,
+                    chat_id: notification.chat_id,
+                    sender_id: null,
+                    content: content,
+                    sent_at: notification.created_at,
+                    created_at: notification.created_at,
+                    updated_at: notification.created_at,
+                };
+
+                this.messages.push(message);
                 console.log(notification);
             },
             handleSendMessage() {

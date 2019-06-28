@@ -234,7 +234,8 @@ class Controller implements MessageComponentInterface
                         'type' => 'add_members',
                         'chat_id' => $chat->id,
                         'members' => $chat->members,
-                        'newMembers' => $newMembers,
+                        'new_members' => $newMembers,
+                        'created_at' => now(),
                     ],
                 ]));
             }
